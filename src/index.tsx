@@ -1,12 +1,11 @@
 import ReactDOM from 'react-dom';
-import { StrictMode } from 'react';
-import './styles/globalStyles.css';
+import axios from 'axios';
 
 import App from './App';
 
-ReactDOM.render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-  document.getElementById('root'),
-);
+import './styles/globalStyles.css';
+import 'antd/dist/antd.css';
+
+axios.defaults.baseURL = 'http://localhost:5000';
+
+ReactDOM.render(<App />, document.getElementById('root'));
