@@ -1,17 +1,24 @@
-import { Button, Popconfirm, Table } from 'antd';
-import { useState } from 'react';
+import { Button, Popconfirm, Table, message } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
 import { DeleteOutlined } from '@ant-design/icons';
 import { ColumnsType } from 'antd/lib/table';
 
 import { TickerSelection } from './TickerSelection';
-import { getDataForStock } from '../api/prices';
+import {
+  createDebugMarketHit,
+  getDataForStock,
+  getDataListForStocks,
+} from '../api/prices';
 import { AlertModal } from './AlertModal';
+import { reduceArrayToMap } from '../utils/reduceArrayToMap';
+import { PriceAlert } from './PriceAlert';
 
 export type StockType = {
-  stock: string;
-  bid: string;
-  ask: string;
-  vol: string;
+  ticker: string;
+  bid: number;
+  ask: number;
+  lastVol: number;
+  open: number;
   hasAlert: boolean;
   priceTreshold: number;
 };
@@ -19,13 +26,14 @@ export type StockType = {
 const getColumns = (
   removeStock: (stockName: string) => void,
   showAlertModal: (stockName: string) => void,
+  sendAlert: (ticker: string, priceTreshold: number) => void,
 ): ColumnsType<StockType> => [
   {
     title: 'Stock',
-    dataIndex: 'stock',
-    key: 'stock',
+    dataIndex: 'ticker',
+    key: 'ticker',
     defaultSortOrder: 'ascend',
-    sorter: (a, b) => a.stock.localeCompare(b.stock),
+    sorter: (a, b) => a.ticker.localeCompare(b.ticker),
   },
   {
     title: 'Bid',
@@ -50,13 +58,15 @@ const getColumns = (
     key: 'hasAlert',
     dataIndex: 'hasAlert',
     render: (hasAlert: boolean, record: StockType) => (
-      <div className="flex">
-        {hasAlert ? (
-          <div className="mr-2">{record.priceTreshold}%</div>
-        ) : (
-          'No alert'
-        )}
-      </div>
+      <PriceAlert
+        hasAlert={hasAlert}
+        priceTreshold={record.priceTreshold}
+        ask={record.ask}
+        bid={record.bid}
+        open={record.open}
+        sendAlert={sendAlert}
+        ticker={record.ticker}
+      />
     ),
   },
   {
@@ -66,7 +76,7 @@ const getColumns = (
       <div className="flex items-center">
         <Popconfirm
           title="Are you sure to delete this stock?"
-          onConfirm={() => removeStock(record.stock)}
+          onConfirm={() => removeStock(record.ticker)}
           okText="Yes"
           cancelText="No"
         >
@@ -76,9 +86,17 @@ const getColumns = (
           size="small"
           type="primary"
           className="ml-2"
-          onClick={() => showAlertModal(record.stock)}
+          onClick={() => showAlertModal(record.ticker)}
         >
           Alert
+        </Button>
+        <Button
+          size="small"
+          type="primary"
+          className="ml-2"
+          onClick={() => createDebugMarketHit(record.ticker)}
+        >
+          Hit
         </Button>
       </div>
     ),
@@ -86,65 +104,116 @@ const getColumns = (
 ];
 
 export const Stocks = () => {
-  const [selectedStocks, setSelectedStocks] = useState<Map<string, StockType>>(
-    new Map(),
+  const [shownAlerts, setShownAlerts] = useState(new Map());
+  const [selectedStocks, setSelectedStocks] = useState<StockType[]>([]);
+  const [visibleModalForTicker, setVisibleModalForTicker] = useState<string>();
+
+  const selectedStockTickerList = useMemo(
+    () => selectedStocks.map(({ ticker }) => ticker),
+    [selectedStocks],
   );
-  const [visibleModalStockName, setVisibleModalStockName] = useState<string>();
+  const selectedStockMap = useMemo(
+    () => reduceArrayToMap(selectedStocks, 'ticker'),
+    [selectedStocks],
+  );
 
-  const addNewStock = async (tickerName: string) => {
-    const newMap = new Map(selectedStocks);
+  useEffect(() => {
+    if (!selectedStockTickerList.length) {
+      return;
+    }
 
-    const data = await getDataForStock(tickerName);
+    const intervalRef = setInterval(async () => {
+      const newList = await getDataListForStocks(selectedStockTickerList);
+
+      if (newList?.length) {
+        setSelectedStocks(
+          newList.map(({ symbol, ...newStock }) => {
+            const prevStock = selectedStockMap.get(symbol);
+
+            return {
+              ...newStock,
+              ticker: symbol,
+              hasAlert: prevStock?.hasAlert || false,
+              priceTreshold: prevStock?.priceTreshold || 0,
+            };
+          }),
+        );
+      }
+    }, 3000);
+
+    return () => {
+      clearInterval(intervalRef);
+    };
+  }, [selectedStockTickerList]);
+
+  const addNewStock = async (ticker: string) => {
+    const data = await getDataForStock(ticker);
 
     if (data) {
-      setSelectedStocks(
-        newMap.set(tickerName, {
-          stock: tickerName,
+      const { symbol, ...newStock } = data;
+      setSelectedStocks([
+        ...selectedStocks,
+        {
+          hasAlert: false,
           priceTreshold: 0,
-          ...data,
-        }),
-      );
+          ticker: symbol,
+          ...newStock,
+        },
+      ]);
     }
   };
 
-  const removeStock = (stockName: string) => {
-    const newMap = new Map(selectedStocks);
-    newMap.delete(stockName);
+  const removeStock = (ticker: string) => {
+    const newList = selectedStocks.filter((stock) => stock.ticker !== ticker);
 
-    setSelectedStocks(newMap);
+    setSelectedStocks(newList);
   };
 
   const hideAlertModal = () => {
-    setVisibleModalStockName(undefined);
+    setVisibleModalForTicker(undefined);
   };
 
-  const showAlertModal = (stockName: string) => {
-    setVisibleModalStockName(stockName);
+  const showAlertModal = (ticker: string) => {
+    setVisibleModalForTicker(ticker);
   };
 
-  const handleAlert = (newStockMap?: Map<string, StockType>) => {
-    if (newStockMap) {
-      setSelectedStocks(newStockMap);
+  const handleAlert = (newList?: StockType[]) => {
+    if (newList) {
+      setSelectedStocks(newList);
     }
 
     hideAlertModal();
   };
 
+  const sendAlert = (ticker: string, priceTreshold: number) => {
+    if (shownAlerts.has(ticker)) {
+      return;
+    }
+
+    const newAlerts = new Map(shownAlerts);
+    newAlerts.set(ticker, ticker);
+    setShownAlerts(newAlerts);
+    message.info(`Price for ${ticker} changed by ${priceTreshold}%`);
+  };
+
   return (
     <div className="max-w-screen-lg w-full">
       <Table<StockType>
-        columns={getColumns(removeStock, showAlertModal)}
+        columns={getColumns(removeStock, showAlertModal, sendAlert)}
         dataSource={Array.from(selectedStocks.values())}
         className="overflow-x-auto"
         pagination={false}
-        rowKey="stock"
+        rowKey="ticker"
       />
-      <TickerSelection addNewStock={addNewStock} />
-      {visibleModalStockName && (
+      <TickerSelection
+        addNewStock={addNewStock}
+        selectedStockMap={selectedStockMap}
+      />
+      {visibleModalForTicker && (
         <AlertModal
           hideAlertModal={hideAlertModal}
           handleAlert={handleAlert}
-          visibleModalStockName={visibleModalStockName}
+          visibleModalForTicker={visibleModalForTicker}
           selectedStocks={selectedStocks}
         />
       )}

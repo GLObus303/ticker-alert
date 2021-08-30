@@ -3,7 +3,9 @@ import axios from 'axios';
 
 import { StockType } from '../components/Stocks';
 
-type ReturnStockType = Omit<StockType, 'stock' | 'priceTreshold'>;
+type ReturnStockType = Pick<StockType, 'bid' | 'ask' | 'lastVol' | 'open'> & {
+  symbol: string;
+};
 
 export const getDataForStock = async (ticker: string) => {
   try {
@@ -22,7 +24,7 @@ export const getDataForStock = async (ticker: string) => {
 export const getDataListForStocks = async (tickerList: string[]) => {
   try {
     const axiosResponse = await axios.get<ReturnStockType[]>(
-      `/price/${tickerList.join(',')}`,
+      `/prices/${tickerList.join(',')}`,
     );
 
     if (axiosResponse?.data) {
@@ -34,3 +36,6 @@ export const getDataListForStocks = async (tickerList: string[]) => {
 
   return null;
 };
+
+export const createDebugMarketHit = (ticker: string) =>
+  axios.get(`/fake-hit/${ticker}?percentage=0.5`);

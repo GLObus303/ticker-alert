@@ -4,19 +4,21 @@ import { useState } from 'react';
 import { StockType } from './Stocks';
 
 type AlertModalProps = {
-  selectedStocks: Map<string, StockType>;
-  visibleModalStockName: string;
-  handleAlert: (newMap?: Map<string, StockType>) => void;
+  selectedStocks: StockType[];
+  visibleModalForTicker: string;
+  handleAlert: (newList?: StockType[]) => void;
   hideAlertModal: () => void;
 };
 
 export const AlertModal: React.FC<AlertModalProps> = ({
   selectedStocks,
-  visibleModalStockName,
+  visibleModalForTicker,
   handleAlert,
   hideAlertModal,
 }) => {
-  const stock = selectedStocks.get(visibleModalStockName);
+  const stock = selectedStocks.find(
+    ({ ticker }) => ticker === visibleModalForTicker,
+  );
 
   const [userWantsAlert, setUserWantsAlert] = useState(!!stock?.hasAlert);
   const [priceTreshold, setPriceTreshold] = useState(stock?.priceTreshold || 0);
@@ -34,21 +36,23 @@ export const AlertModal: React.FC<AlertModalProps> = ({
       return handleAlert();
     }
 
-    const newMap = new Map(selectedStocks);
-    newMap.delete(visibleModalStockName);
-    newMap.set(visibleModalStockName, {
-      ...stock,
-      hasAlert: userWantsAlert,
-      priceTreshold,
-    });
+    const newList = selectedStocks.map((item) =>
+      stock.ticker === item.ticker
+        ? {
+            ...item,
+            hasAlert: userWantsAlert,
+            priceTreshold,
+          }
+        : item,
+    );
 
-    handleAlert(newMap);
+    handleAlert(newList);
   };
 
   return (
     <Modal
       title="Edit alert"
-      visible={!!visibleModalStockName}
+      visible={!!visibleModalForTicker}
       okText="Edit"
       cancelText="Cancel"
       onOk={handleEdit}
